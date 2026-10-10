@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altinity/go-mcp-oauth-sdk/jwe_auth"
-	"github.com/altinity/go-mcp-oauth-sdk/oauth"
+	"github.com/eduard-gr/go-mcp-oauth-sdk/jwe_auth"
+	"github.com/eduard-gr/go-mcp-oauth-sdk/oauth"
 	"github.com/go-jose/go-jose/v4"
 )
 

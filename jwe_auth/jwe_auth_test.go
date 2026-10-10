@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altinity/go-mcp-oauth-sdk/jwe_auth"
+	"github.com/eduard-gr/go-mcp-oauth-sdk/jwe_auth"
 	"github.com/go-jose/go-jose/v4"
 	"github.com/stretchr/testify/require"
 )

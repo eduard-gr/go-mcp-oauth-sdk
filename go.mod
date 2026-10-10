@@ -1,4 +1,4 @@
-module github.com/altinity/go-mcp-oauth-sdk
+module github.com/eduard-gr/go-mcp-oauth-sdk
 
 go 1.26
 
