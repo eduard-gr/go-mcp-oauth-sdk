@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -142,9 +143,7 @@ func (v *Verifier) fetchJWKSet(ctx context.Context, jwksURI string) (result *jos
 	}
 	v.jwksMu.RUnlock()
 
-	// Beyond this point we make an actual IdP RPC; record it for /readyz.
-	// recordJWKSFetchResult runs in a defer so each early-return error
-	// site updates the health snapshot exactly once.
+	// Beyond this point we make an actual fetch; record it for /readyz.
 	v.healthMu.Lock()
 	v.jwksLastFetchAttempt = now
 	v.healthMu.Unlock()
@@ -159,33 +158,46 @@ func (v *Verifier) fetchJWKSet(ctx context.Context, jwksURI string) (result *jos
 		}
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build jwks request: %w", err)
-	}
-	resp, err := (&http.Client{Timeout: httpTimeout}).Do(req)
-	if err != nil {
-		// Connection refused / DNS / TLS / timeout — never a permanent
-		// reason to reject the *token*. Mark transient.
-		return nil, fmt.Errorf("failed to fetch jwks: %w: %w", ErrTransient, err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Warn().Stack().Err(closeErr).Msgf("can't close %s response body", jwksURI)
+	var body []byte
+	var err error
+
+	if strings.HasPrefix(jwksURI, "file://") {
+		// Убираем префикс file:// для получения пути к файлу.
+		// Корректно обрабатываем как file:///path, так и file://path.
+		filePath := strings.TrimPrefix(jwksURI, "file://")
+		// На случай если путь был в формате file:///etc/hosts (на Unix) или со слешем
+		if strings.HasPrefix(filePath, "//") {
+			filePath = strings.TrimPrefix(filePath, "/")
 		}
-	}()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		// Body-read aborts are transport-level — same reasoning as Do() error.
-		return nil, fmt.Errorf("failed to read jwks response: %w: %w", ErrTransient, err)
-	}
-	if resp.StatusCode >= 500 {
-		// Upstream 5xx is transient; 4xx (incl. 404 on a wrong URL) is
-		// operator misconfiguration and stays permanent.
-		return nil, fmt.Errorf("jwks endpoint returned status %d: %w", resp.StatusCode, ErrTransient)
-	}
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("jwks endpoint returned status %d", resp.StatusCode)
+
+		body, err = os.ReadFile(filePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read jwks file: %w", err)
+		}
+	} else {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build jwks request: %w", err)
+		}
+		resp, err := (&http.Client{Timeout: httpTimeout}).Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch jwks: %w: %w", ErrTransient, err)
+		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				log.Warn().Stack().Err(closeErr).Msgf("can't close %s response body", jwksURI)
+			}
+		}()
+		body, err = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read jwks response: %w: %w", ErrTransient, err)
+		}
+		if resp.StatusCode >= 500 {
+			return nil, fmt.Errorf("jwks endpoint returned status %d: %w", resp.StatusCode, ErrTransient)
+		}
+		if resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("jwks endpoint returned status %d", resp.StatusCode)
+		}
 	}
 
 	var keySet jose.JSONWebKeySet
